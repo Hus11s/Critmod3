@@ -10,12 +10,8 @@ public class ExampleMod implements ClientModInitializer {
     public void onInitializeClient() {
         HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
             MinecraftClient client = MinecraftClient.getInstance();
-            if (client.player != null && !client.options.hudHidden) {
-                drawContext.drawCenteredTextWithShadow(client.textRenderer, 
-                    "TEST OK", 
-                    drawContext.getScaledWindowWidth() / 2, 
-                    10, 
-                    0xFFFFFF);
+            if (client.player != null) {
+                drawContext.drawCenteredTextWithShadow(client.textRenderer, "STATUS: OK", drawContext.getScaledWindowWidth() / 2, 10, 0xFFFFFF);
             }
         });
     }
