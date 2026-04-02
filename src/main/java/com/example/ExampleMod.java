@@ -1,24 +1,45 @@
-package com.example;
+package net.fabricmc.example;
 
-import net.fabricmc.api.ModInitializer;
+import net.fabricmc.api.ClientModInitializer;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandManager;
+import net.fabricmc.fabric.api.client.command.v2.ClientCommandRegistrationCallback;
+import net.fabricmc.fabric.api.client.rendering.v1.HudRenderCallback;
+import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.DrawContext;
+import net.minecraft.entity.attribute.EntityAttributes;
+import net.minecraft.text.Text;
 
-import org.slf4j.Logger;
-import org.slf4j.LoggerFactory;
+public class ExampleMod implements ClientModInitializer {
+    public static double targetHp = 20.0;
+    public static boolean holyMode = false;
 
-public class ExampleMod implements ModInitializer {
-	public static final String MOD_ID = "modid";
+    @Override
+    public void onInitializeClient() {
+        ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
+            dispatcher.register(ClientCommandManager.literal("hp")
+                .then(ClientCommandManager.literal("pal").executes(c -> setHp(c.getSource().getClient(), 32.0)))
+                .then(ClientCommandManager.literal("holy").executes(c -> {
+                    holyMode = !holyMode;
+                    c.getSource().getClient().player.sendMessage(Text.literal("Holy: " + holyMode), false);
+                    return 1;
+                })));
+        });
+        HudRenderCallback.EVENT.register(this::onHudRender);
+    }
 
-	// This logger is used to write text to the console and the log file.
-	// It is considered best practice to use your mod id as the logger's name.
-	// That way, it's clear which mod wrote info, warnings, and errors.
-	public static final Logger LOGGER = LoggerFactory.getLogger(MOD_ID);
+    private int setHp(MinecraftClient client, double hp) {
+        targetHp = hp;
+        client.player.sendMessage(Text.literal("HP set to " + hp), false);
+        return 1;
+    }
 
-	@Override
-	public void onInitialize() {
-		// This code runs as soon as Minecraft is in a mod-load-ready state.
-		// However, some things (like resources) may still be uninitialized.
-		// Proceed with mild caution.
-
-		LOGGER.info("Hello Fabric world!");
-	}
-}
+    private void onHudRender(DrawContext drawContext, float tickDelta) {
+        MinecraftClient client = MinecraftClient.getInstance();
+        if (client.player == null) return;
+        double damage = client.player.getAttributeValue(EntityAttributes.GENERIC_ATTACK_DAMAGE) + 3.5;
+        double finalDmg = (damage * 1.5) * 0.15; // Усредненный Z5
+        int crits = (int) Math.ceil((targetHp + (holyMode ? 15 : 0)) / finalDmg);
+        drawContext.drawCenteredTextWithShadow(client.textRenderer, crits + " CRITS", 
+            drawContext.getScaledWindowWidth() / 2, drawContext.getScaledWindowHeight() / 2 + 10, 0xFFFFFF);
+    }
+} 
