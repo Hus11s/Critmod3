@@ -1,13 +1,13 @@
 {
   "schemaVersion": 1,
-  "id": "modid",
+  "id": "critmod3",
   "version": "1.0.0",
-  "name": "Example Mod",
-  "description": "My first Fabric mod!",
+  "name": "Crit Mod",
+  "description": "Custom crit mod",
   "authors": ["Hus11s"],
   "contact": {},
   "license": "MIT",
-  "icon": "assets/modid/icon.png",
+  "icon": "assets/critmod3/icon.png",
   "environment": "*",
   "entrypoints": {
     "client": [
