@@ -17,29 +17,25 @@ import java.util.HashMap;
 import java.util.Map;
 
 public class ExampleMod implements ClientModInitializer {
-    private float targetHp = 24.0f;
+    private float targetHp = 20.0f;
+    private float maxTargetHp = 20.0f; // Для ограничения регена
     private String lastTargetName = "НЕТ";
     private int comboCrits = 0;
     private long lastHitTime = 0;
+    private long lastRegenTick = 0;
 
-    // БАЗА ДАННЫХ СФЕР
     private static final Map<String, Float> HP_BASES = new HashMap<>();
     static {
-        HP_BASES.put("хаос", 16.0f);    // 20 - 4
-        HP_BASES.put("арес", 18.0f);    // 20 - 2
-        HP_BASES.put("каратель", 16.0f); // 20 - 4
-        HP_BASES.put("ярость", 16.0f);  // 20 - 4
-        HP_BASES.put("гидра", 24.0f);   // 20 + 4
-        HP_BASES.put("бестия", 24.0f);  // 20 + 4
-        HP_BASES.put("круша", 24.0f);   // 20 + 4
+        // Значения: База (20) + Доп. сердца сферы
+        HP_BASES.put("хаос", 16.0f);    
+        HP_BASES.put("арес", 18.0f);    
         HP_BASES.put("пал", 32.0f);     // 20 + 12
-        HP_BASES.put("чарка", 44.0f);   // 20 + 12 + 12
+        HP_BASES.put("чарка", 44.0f);   // 20 + 24 (если с чаркой)
         HP_BASES.put("дефолт", 20.0f);
     }
 
     @Override
     public void onInitializeClient() {
-        // КОМАНДА: /hp <тип/число> <ник>
         ClientCommandRegistrationCallback.EVENT.register((dispatcher, registryAccess) -> {
             dispatcher.register(ClientCommandManager.literal("hp")
                 .then(ClientCommandManager.argument("preset", StringArgumentType.string())
@@ -48,15 +44,11 @@ public class ExampleMod implements ClientModInitializer {
                     String preset = StringArgumentType.getString(context, "preset").toLowerCase();
                     this.lastTargetName = StringArgumentType.getString(context, "name");
                     
-                    // Если ввели число - ставим число, если слово - берем из базы
-                    try {
-                        this.targetHp = Float.parseFloat(preset);
-                    } catch (NumberFormatException e) {
-                        this.targetHp = HP_BASES.getOrDefault(preset, 24.0f);
-                    }
-                    
+                    this.targetHp = HP_BASES.getOrDefault(preset, 20.0f);
+                    this.maxTargetHp = this.targetHp; // Запоминаем максимум
                     this.comboCrits = 0;
-                    context.getSource().sendFeedback(Text.of("§aТрекинг §6" + lastTargetName + " §aначат с §e" + targetHp + " HP"));
+                    
+                    context.getSource().getClient().player.sendMessage(Text.literal("§a[FT] Цель: §6" + lastTargetName + " §e(" + targetHp + " HP)"), false);
                     return 1;
                 }))));
         });
@@ -64,19 +56,25 @@ public class ExampleMod implements ClientModInitializer {
         AttackEntityCallback.EVENT.register((player, world, hand, entity, hitResult) -> {
             if (world.isClient && entity instanceof LivingEntity target) {
                 long now = System.currentTimeMillis();
-                if (now - lastHitTime > 8000) comboCrits = 0;
                 
+                // Сброс комбо (8 сек)
+                if (now - lastHitTime > 8000) comboCrits = 0;
                 lastHitTime = now;
-                lastTargetName = target.getName().getString();
                 comboCrits++;
 
-                // РАСЧЕТ УРОНА (Z5 80%)
+                // РАСЧЕТ УРОНА (Z5 80% срез)
                 float myBonus = getOffhandDmg(player.getStackInHand(Hand.OFF_HAND).getName().getString().toLowerCase());
-                if (player.hasStatusEffect(StatusEffects.STRENGTH)) {
-                    myBonus += (player.getStatusEffect(StatusEffects.STRENGTH).getAmplifier() + 1) * 3.0f;
-                }
                 
-                targetHp -= (8.0f + myBonus) * 0.2f; // 80% поглощения
+                // Сила (для 1.21.x)
+                if (player.hasStatusEffect(StatusEffects.STRENGTH)) {
+                    var effect = player.getStatusEffect(StatusEffects.STRENGTH);
+                    if (effect != null) myBonus += (effect.getAmplifier() + 1) * 3.0f;
+                }
+
+                // Крит множитель 1.5х, срез брони 0.2
+                float hitDamage = (8.0f + myBonus) * 1.5f * 0.2f;
+                targetHp -= hitDamage;
+                
                 if (targetHp < 0) targetHp = 0;
             }
             return ActionResult.PASS;
@@ -84,15 +82,31 @@ public class ExampleMod implements ClientModInitializer {
 
         HudRenderCallback.EVENT.register((drawContext, tickDelta) -> {
             MinecraftClient client = MinecraftClient.getInstance();
-            if (client.player == null || client.options.hudHidden) return;
+            if (client.player == null || client.world == null || client.options.hudHidden) return;
 
-            int x = 10; int y = 40;
-            drawContext.drawTextWithShadow(client.textRenderer, "§6§l[FT] Z5 SYSTEM", x, y, 0xFFFFFF);
-            
-            if (System.currentTimeMillis() - lastHitTime < 15000) {
-                drawContext.drawTextWithShadow(client.textRenderer, "§fЦЕЛЬ: §d" + lastTargetName, x, y + 12, 0xFFFFFF);
-                drawContext.drawTextWithShadow(client.textRenderer, "§fHP: §a" + String.format("%.1f", targetHp), x, y + 24, 0xFFFFFF);
-                drawContext.drawTextWithShadow(client.textRenderer, "§fСЕРИЯ: §e" + comboCrits + " / 13", x, y + 36, 0xFFFFFF);
+            long now = System.currentTimeMillis();
+
+            // ИМИТАЦИЯ РЕГЕНЕРАЦИИ (Реген 2 восстанавливает ~0.4 HP в сек)
+            if (now - lastRegenTick > 1000) { // Раз в секунду
+                if (targetHp < maxTargetHp) {
+                    targetHp += 0.4f; // Реген 2
+                    if (targetHp > maxTargetHp) targetHp = maxTargetHp;
+                }
+                lastRegenTick = now;
+            }
+
+            // Отрисовка HUD
+            if (now - lastHitTime < 15000) {
+                int x = 10; int y = 50;
+                drawContext.drawTextWithShadow(client.textRenderer, Text.literal("§6§l[FT] Z5 TRACKER"), x, y, 0xFFFFFF);
+                drawContext.drawTextWithShadow(client.textRenderer, Text.literal("§fЦЕЛЬ: §d" + lastTargetName), x, y + 12, 0xFFFFFF);
+                
+                // Цвет HP меняется от состояния
+                int hpColor = targetHp < 10 ? 0xFF5555 : 0x55FF55;
+                drawContext.drawTextWithShadow(client.textRenderer, Text.literal("§fHP: "), x, y + 24, 0xFFFFFF);
+                drawContext.drawTextWithShadow(client.textRenderer, Text.literal(String.format("%.1f", targetHp)), x + 25, y + 24, hpColor);
+                
+                drawContext.drawTextWithShadow(client.textRenderer, Text.literal("§fСЕРИЯ: §e" + comboCrits), x, y + 36, 0xFFFFFF);
             }
         });
     }
